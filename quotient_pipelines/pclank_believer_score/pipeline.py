@@ -10,14 +10,7 @@ from dagster import (
 
 from quotient_pipelines.common.resources import neo4j_resource
 from quotient_pipelines.common.metadata import fetch_moralis_token_metadata
-from quotient_pipelines.common.holders import fetch_holders
-
-TEST_ADDRESS = "0x0ce2495d150daf8a3cd2f5200c4c2694e2934c1a"
-
-@op 
-def print_df(context, df):
-    context.log.info(f"Page rows = {len(df)}")
-    context.log.debug(df.head)
+from quotient_pipelines.common.holders import fetch_and_ingest_holders
 
 # ─── 1) Pull addresses from Neo4j ─────────────────────────────────────────────
 @op(required_resource_keys={"neo4j"})
@@ -35,9 +28,16 @@ def list_addresses(context) -> list[str]:
     context.log.info(f"Found {len(tokens)} tokens in Neo4j: {tokens}")
     return tokens
 
-# ─── 2) Compute & Store  ────────────────────────
+# Create a dynamic output for addresses
+@op(out=DynamicOut())
+def process_addresses(context, addresses: list[str]):
+    """Convert a list of addresses into individual dynamic outputs"""
+    for i, addr in enumerate(addresses):
+        yield DynamicOutput(addr, mapping_key=f"addr_{i}")
+
+# ─── 2) Set Token Metadata  ────────────────────────
 @op(required_resource_keys={"neo4j"})
-def compute_and_store_neo4j(context, metadata: dict):
+def set_token_metadata(context, metadata: dict):
     """
     Set token metadata on :Token node in Neo4j
     """
@@ -51,11 +51,13 @@ def compute_and_store_neo4j(context, metadata: dict):
     ON CREATE SET 
         t.name = $name, 
         t.symbol = $symbol, 
-        t.marketCap = $marketCap,
+        t.marketCap = tofloat($marketCap),
         t.createdDt = timestamp(),
         t.lastUpdateDt = timestamp()
     ON MATCH SET
-        t.marketCap = $marketCap,
+        t.name = $name, 
+        t.symbol = $symbol, 
+        t.marketCap = tofloat($marketCap),
         t.lastUpdateDt = timestamp()
     """
 
@@ -70,10 +72,11 @@ def compute_and_store_neo4j(context, metadata: dict):
 
 @graph
 def pclank_believer_score_graph():
+    # First part: Get metadata and set it in Neo4j
     addrs = list_addresses()
     metas = fetch_moralis_token_metadata(addrs)
-    metas.map(compute_and_store_neo4j)
-
+    metas.map(set_token_metadata)
+    
 
 # ─── 5) Expose as a Job & Definitions ─────────────────────────────────────────
 pclank_believer_score_job = pclank_believer_score_graph.to_job(
@@ -82,4 +85,3 @@ pclank_believer_score_job = pclank_believer_score_graph.to_job(
 )
 
 defs = Definitions(jobs=[pclank_believer_score_job])
-

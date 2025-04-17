@@ -12,6 +12,8 @@ from quotient_pipelines.common.resources import neo4j_resource
 from quotient_pipelines.common.metadata import fetch_moralis_token_metadata
 from quotient_pipelines.common.holders import fetch_and_ingest_holders
 
+from .believer_score_query import believer_score_query
+
 # ─── 1) Pull addresses from Neo4j ─────────────────────────────────────────────
 @op(required_resource_keys={"neo4j"})
 def list_addresses(context) -> list[str]:
@@ -70,13 +72,28 @@ def set_token_metadata(context, metadata: dict):
     )
     context.log.info(f"Upserted Token({address}) → name={name}, symbol={symbol}, marketCap={marketCap}")
 
+
+
+@op(required_resource_keys={"neo4j"})
+def set_pclank_believer_scores(context):
+    context.log.info(f"Running believer score query...")
+    ### add decorators for head + counts
+    query_txt = believer_score_query()
+    believer_query_response = context.resources.neo4j.run_query(query_txt)
+    context.log.info(f"Results from believer query: {believer_query_response}")
+    context.log.info(f"Believer scores updated successfully")
+
+
+
 @graph
 def pclank_believer_score_graph():
     # First part: Get metadata and set it in Neo4j
-    addrs = list_addresses()
-    metas = fetch_moralis_token_metadata(addrs)
-    metas.map(set_token_metadata)
+    # addrs = list_addresses()
+    # metas = fetch_moralis_token_metadata(addrs)
+    # metas.map(set_token_metadata)
     
+    # Set believer scores
+    set_pclank_believer_scores()
 
 # ─── 5) Expose as a Job & Definitions ─────────────────────────────────────────
 pclank_believer_score_job = pclank_believer_score_graph.to_job(

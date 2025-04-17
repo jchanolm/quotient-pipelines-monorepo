@@ -74,53 +74,62 @@ def set_token_metadata(context, metadata: dict):
 
 
 @op(required_resource_keys={'neo4j'})
-def set_token_holder_count(context, address: str):
+def set_token_holder_count(context, token_data: dict):
     """
-    Sets holder count on :Token.holderCount using Ankr API
+    Sets holder count on :Token.holderCount using data from Ankr API
     """
     try:
-        holder_count = get_token_holders_count_ankr(context, address)
-        if holder_count is not None and holder_count > 0:
-            cypher = """
-            MATCH (t:Token {address: $address})
-            SET t.holderCount = $holder_count,
-                t.lastUpdateDt = datetime()
-            """
-            context.resources.neo4j.run_query(
-                cypher,
-                address=address.lower(),
-                holder_count=holder_count
-            )
-            context.log.info(f"Updated holder count for {address} to {holder_count}")
-        else:
-            context.log.warning(f"Skipping holder count update for {address}: count was {holder_count}")
+        address = token_data['address'].lower()
+        holder_count = token_data['holderCount']
+        
+        cypher = """
+        MATCH (t:Token {address: $address})
+        SET t.holderCount = $holder_count,
+            t.lastUpdateDt = datetime()
+        RETURN t.address, t.holderCount
+        """
+        
+        result = context.resources.neo4j.run_query(
+            cypher,
+            address=address,
+            holder_count=holder_count
+        )
+        
+        context.log.info(f"Updated holder count for {address} to {holder_count}")
+        return result
     except Exception as e:
-        context.log.error(f"Error setting holder count for {address}: {str(e)}")
+        context.log.error(f"Error setting holder count for {token_data['address']}: {str(e)}")
+        return None
 
 
 @op(required_resource_keys={"neo4j"})
-def set_pclank_believer_scores(context):
-    context.log.info(f"Running believer score query...")
-    ### add decorators for head + counts
+def set_pclank_believer_scores(context, metadata_results=None, holder_count_results=None):
+    """
+    Calculate and set believer scores in Neo4j.
+    The parameters are only used to create dependencies, ensuring this runs after metadata and holder count operations.
+    """
+    context.log.info(f"All metadata and holder count operations complete. Starting believer score calculation...")
     query_txt = believer_score_query()
     believer_query_response = context.resources.neo4j.run_query(query_txt)
     context.log.info(f"Results from believer query: {believer_query_response}")
     context.log.info(f"Believer scores updated successfully")
 
-
 @graph
 def pclank_believer_score_graph():
     # First part: Get metadata and set it in Neo4j
     addrs = list_addresses()
-    # metas = fetch_moralis_token_metadata(addrs)
-    # metas.map(set_token_metadata)
     
-    # Set holder counts for each token
-    processed_addrs = process_addresses(addrs)
-    processed_addrs.map(set_token_holder_count)
+    # Get and set token metadata
+    metas = fetch_moralis_token_metadata(addrs)
+    metadata_results = metas.map(set_token_metadata)
     
-    # Set believer scores
-    # set_pclank_believer_scores()
+    # Get and set holder counts for each token
+    holder_counts = get_token_holders_count_ankr(addrs)
+    holder_count_results = holder_counts.map(set_token_holder_count)
+    
+    # Only run set_pclank_believer_scores after both metadata and holder count operations are complete
+    set_pclank_believer_scores(metadata_results.collect(), holder_count_results.collect())
+
 
 # ─── 5) Expose as a Job & Definitions ─────────────────────────────────────────
 pclank_believer_score_job = pclank_believer_score_graph.to_job(

@@ -10,6 +10,14 @@ from dagster import (
 
 from quotient_pipelines.common.resources import neo4j_resource
 from quotient_pipelines.common.metadata import fetch_moralis_token_metadata
+from quotient_pipelines.common.holders import fetch_holders
+
+TEST_ADDRESS = "0x0ce2495d150daf8a3cd2f5200c4c2694e2934c1a"
+
+@op 
+def print_df(context, df):
+    context.log.info(f"Page rows = {len(df)}")
+    context.log.debug(df.head)
 
 # ─── 1) Pull addresses from Neo4j ─────────────────────────────────────────────
 @op(required_resource_keys={"neo4j"})
@@ -65,6 +73,7 @@ def pclank_believer_score_graph():
     addrs = list_addresses()
     metas = fetch_moralis_token_metadata(addrs)
     metas.map(compute_and_store_neo4j)
+
 
 # ─── 5) Expose as a Job & Definitions ─────────────────────────────────────────
 pclank_believer_score_job = pclank_believer_score_graph.to_job(

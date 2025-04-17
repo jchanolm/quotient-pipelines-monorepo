@@ -2,6 +2,7 @@
 
 import os
 import httpx
+import requests
 from dagster import op, DynamicOut, DynamicOutput
 
 from dotenv import load_dotenv
@@ -49,4 +50,42 @@ def fetch_moralis_token_metadata(context, addresses: list[str]):
         }
 
         yield DynamicOutput(token_meta, mapping_key=address)
+
+
+@op(
+    out=DynamicOut(),
+    description="Fetch # of holders for token from Ankr",
+)
+def get_token_holders_count_ankr(context, token_address):
+    """Get token holder count from Ankr API"""
+    url = os.getenv('ANKR_RPC_URL')
+    
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "ankr_getTokenHoldersCount",
+        "params": {
+            "blockchain": "base",
+            "contractAddress": token_address
+        },
+        "id": 1
+    }
+    
+    headers = {
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        response = requests.post(url, json=payload, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        token_count_dict = {
+            'address': token_address,
+            'holderCount': data['result']['holderCountHistory'][0]['holderCount']
+        }
+        context.log.info(f"Collected token holder count for token: {token_address}:  {token_count_dict})")
+        yield DynamicOutput(token_count_dict, mapping_key=token_address)
+    
+    except Exception as e:
+        context.log.error(f"Error fetching holder count for {token_address}: {e}")
+        return None
 

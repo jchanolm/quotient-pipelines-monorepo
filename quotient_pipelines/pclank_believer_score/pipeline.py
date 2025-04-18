@@ -14,6 +14,55 @@ from quotient_pipelines.common.holders import fetch_and_ingest_holders
 
 from .believer_score_query import believer_score_query
 
+# ─── 1) Check Product Clank for Tokens ─────────────────────────────────────────────
+@op(required_resource_keys={"neo4j"})
+def fetch_and_merge_pclank_tokens(context):
+    """
+    Fetch tokens from Product Clank API and merge them into Neo4j
+    """
+    PCLANK_API_URL = "https://app.productclank.com/api/getTokens"
+    API_KEY = "vTIWAa$F1nm6Qz"
+    
+    try:
+        # Fetch tokens from Product Clank
+        headers = {"x-api-key": API_KEY}
+        response = httpx.get(PCLANK_API_URL, headers=headers)
+        response.raise_for_status()
+        
+        tokens_data = response.json()
+        tokens = tokens_data.get("tokens", [])
+        
+        # Merge each token into Neo4j
+        for token in tokens:
+            address = token["address"].lower()  # Normalize address to lowercase
+            ticker = token["ticker"]
+            
+            cypher = """
+            MERGE (t:Token {address: $address})
+            ON CREATE SET 
+                t.ticker = $ticker,
+                t.createdDt = datetime(),
+                t.lastUpdateDt = datetime(),
+                t.source = 'product_clank'
+            ON MATCH SET 
+                t.ticker = $ticker,
+                t.lastUpdateDt = datetime(),
+                t.source = 'product_clank'
+            """
+            
+            context.resources.neo4j.run_query(
+                cypher,
+                address=address,
+                ticker=ticker
+            )
+            
+        context.log.info(f"Successfully merged {len(tokens)} tokens from Product Clank")
+        return [token["address"].lower() for token in tokens]
+        
+    except Exception as e:
+        context.log.error(f"Error fetching/merging Product Clank tokens: {str(e)}")
+        return []
+
 # ─── 1) Pull addresses from Neo4j ─────────────────────────────────────────────
 @op(required_resource_keys={"neo4j"})
 def list_addresses(context) -> list[str]:
@@ -116,7 +165,10 @@ def set_pclank_believer_scores(context, metadata_results=None, holder_count_resu
 
 @graph
 def pclank_believer_score_graph():
-    # First part: Get metadata and set it in Neo4j
+    # First: Fetch and merge Product Clank tokens
+    fetch_and_merge_pclank_tokens()
+    
+    # Then get all addresses from Neo4j
     addrs = list_addresses()
     
     # Get and set token metadata

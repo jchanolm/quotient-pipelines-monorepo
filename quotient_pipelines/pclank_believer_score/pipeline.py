@@ -11,6 +11,7 @@ from dagster import (
 from quotient_pipelines.common.resources import neo4j_resource
 from quotient_pipelines.common.metadata import fetch_moralis_token_metadata, get_token_holders_count_ankr
 from quotient_pipelines.common.holders import fetch_and_ingest_holders
+from quotient_pipelines.common.neo4j_ingestor import Neo4jIngestor  # Import the resource function, not the class
 
 from .believer_score_query import believer_score_query
 
@@ -152,41 +153,53 @@ def set_token_holder_count(context, token_data: dict):
 
 
 @op(required_resource_keys={"neo4j"})
-def set_pclank_believer_scores(context, metadata_results=None, holder_count_results=None):
+def set_pclank_believer_scores(context, metadata_results=None, holder_count_results=None, holder_ingestion_results=None):
     """
     Calculate and set believer scores in Neo4j.
     The parameters are only used to create dependencies, ensuring this runs after metadata and holder count operations.
     """
-    context.log.info(f"All metadata and holder count operations complete. Starting believer score calculation...")
+    context.log.info(f"All metadata, holder count, and holder ingestion operations complete. Starting believer score calculation...")
     query_txt = believer_score_query()
     believer_query_response = context.resources.neo4j.run_query(query_txt)
     context.log.info(f"Results from believer query: {believer_query_response}")
     context.log.info(f"Believer scores updated successfully")
 
+
 @graph
 def pclank_believer_score_graph():
     # First: Fetch and merge Product Clank tokens
-    fetch_and_merge_pclank_tokens()
+    # fetch_and_merge_pclank_tokens()
     
     # Then get all addresses from Neo4j
     addrs = list_addresses()
     
     # Get and set token metadata
-    metas = fetch_moralis_token_metadata(addrs)
-    metadata_results = metas.map(set_token_metadata)
+    # metas = fetch_moralis_token_metadata(addrs)
+    # metadata_results = metas.map(set_token_metadata)
     
-    # Get and set holder counts for each token
-    holder_counts = get_token_holders_count_ankr(addrs)
-    holder_count_results = holder_counts.map(set_token_holder_count)
+    # # Get and set holder counts for each token
+    # holder_counts = get_token_holders_count_ankr(addrs)
+    # holder_count_results = holder_counts.map(set_token_holder_count)
     
-    # Only run set_pclank_believer_scores after both metadata and holder count operations are complete
-    set_pclank_believer_scores(metadata_results.collect(), holder_count_results.collect())
+    # ADDED: Process addresses for holder ingestion using S3 and Neo4j
+    addr_outputs = process_addresses(addrs)
+    holder_ingestion_results = addr_outputs.map(fetch_and_ingest_holders)
+    
+    # # Only run set_pclank_believer_scores after all operations are complete
+    # set_pclank_believer_scores(
+    #     metadata_results.collect(),
+    #     holder_count_results.collect(),
+    #     holder_ingestion_results.collect()
+    # )
 
 
 # ─── 5) Expose as a Job & Definitions ─────────────────────────────────────────
 pclank_believer_score_job = pclank_believer_score_graph.to_job(
     name="pclank_believer_score",
-    resource_defs={"neo4j": neo4j_resource},
+    resource_defs={
+        "neo4j": neo4j_resource,
+        "neo4j_ingestor": Neo4jIngestor
+    },
 )
 
 defs = Definitions(jobs=[pclank_believer_score_job])

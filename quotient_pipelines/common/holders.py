@@ -103,38 +103,27 @@ def fetch_and_ingest_holders(context, contract_address: str):
             WITH w, row
             MATCH (t:Token {{address: '{contract_address.lower()}'}})
             MERGE (w)-[r:HOLDS]->(t)
-            SET r.balance = tofloat(row.balance), 
-                r.balanceRaw = tofloat(row.balanceRaw), 
-                r.lastUpdated = datetime()
+            SET r.balance = tofloat(row.balance)
+            SET r.balanceRaw = tofloat(row.balanceRaw)
+            SET r.lastUpdated = datetime()
+            SET r.real = True
             RETURN count(r) AS count
             """
-            context.log.info(cypher_query)
+            
+            # Log the Cypher query for debugging
+            context.log.info(f"Using Cypher query: {cypher_query}")
             
             # Use ingestor to save to S3 and run the Cypher query
-            result = context.resources.neo4j_ingestor.ingest_dataframe(
+            # Now returns total records processed rather than a complex results object
+            total_ingested = context.resources.neo4j_ingestor.ingest_dataframe(
                 df=all_holders_df,
                 bucket_name=bucket_name,
                 file_name=file_name,
-                cypher_query=cypher_query
+                cypher_query=cypher_query,
+                step_log=context.log,
             )
             
-            context.log.info(result)
-            # Log details about the ingestion
-            context.log.info(f"S3 CSV ingestion completed: {result['successful_chunks']}/{result['total_chunks']} chunks processed")
-            
-            # Get total_records from results if available
-            total_ingested = 0
-            
-            for i, chunk_result in enumerate(result.get('results', [])):
-                if chunk_result and len(chunk_result) > 0:
-                    chunk_count = chunk_result[0].value()
-                    total_ingested += chunk_count
-                    context.log.info(f"Chunk {i+1}: Ingested {chunk_count} records")
-                else:
-                    context.log.warning(f"Chunk {i+1}: Could not determine number of records ingested")
-                    context.log.info(f"Chunk result structure: {chunk_result}")
-            
-            context.log.info(f"Total records ingested across all chunks: {total_ingested}")
+            context.log.info(f"Total records ingested: {total_ingested}")
             
             # Verify data was inserted with a direct query
             try:

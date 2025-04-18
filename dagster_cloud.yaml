@@ -1,9 +1,0 @@
-python_version: "3.11"
-
-code_locations:
-  - location_name: quotient_pipelines
-    working_directory: "."
-    loadable_target_module: quotient_pipelines
-    image:
-      repository: ghcr.io/jchanolm/quotient-pipelines-monorepo
-      tag: ${{SHA}}

@@ -10,8 +10,8 @@ import traceback
 # Load environment variables
 dotenv_loaded = load_dotenv()
 
-# Op: fetch token holders from Ankr and ingest them into Neo4j
-@op(required_resource_keys={'neo4j'}, description="Fetch holders and ingest to Neo4j")
+# Op: fetch token holders from Ankr and ingest them into Neo4j via S3
+@op(required_resource_keys={'neo4j_ingestor'}, description="Fetch holders and ingest to Neo4j via S3")
 def fetch_and_ingest_holders(context, contract_address: str):
     url = os.getenv("ANKR_RPC_URL")
     if not url:
@@ -20,7 +20,9 @@ def fetch_and_ingest_holders(context, contract_address: str):
         
     page_token = None
     total_holders = 0
+    all_holders_df = None  # This will hold all holders across pages for the current token
 
+    # Step 1: Fetch all holders data from Ankr API (paginated)
     while True:
         try:
             # Prepare request
@@ -58,63 +60,18 @@ def fetch_and_ingest_holders(context, contract_address: str):
                 context.log.info(f"Sample data: {df.head(1).to_dict('records')}")
                 break
                 
-            # Create records for Neo4j
-            try:
-                records = df.to_dict('records')
-                params_list = []
-                for r in records:
-                    try:
-                        params_list.append({
-                            "address": r['holderAddress'].lower(),
-                            "balance": float(r['balance']),
-                            "balanceRaw": r['balanceRawInteger']
-                        })
-                    except (KeyError, ValueError) as e:
-                        context.log.warning(f"Error processing record {r}: {str(e)}")
-                
-                context.log.info(f"Prepared {len(params_list)} records for Neo4j ingestion from {page_count} holders")
-                context.log.info(f"Neo4j query params sample (first 2): {params_list[:2]}")
-            except Exception as e:
-                context.log.error(f"Failed to process dataframe records: {str(e)}")
-                context.log.error(traceback.format_exc())
-                break
-
-            # Ingest to Neo4j
-            try:
-                # Batch create relationships
-                cypher = """
-                UNWIND $holders AS h
-                MERGE (w:Wallet {address: h.address})
-                WITH w
-                MATCH (t:Token {address: $token_address})
-                MERGE (w)-[r:HOLDS]->(t)
-                SET r.balance = tofloat(h.balance), r.balanceRaw = tofloat(h.balanceRaw), r.lastUpdated = datetime()
-                RETURN COUNT(*)
-                """
-
-                context.log.info(f"Executing Neo4j query for {len(params_list)} holders")
-                context.resources.neo4j.run_query(cypher, holders=params_list, token_address=contract_address.lower())
-                context.log.info(f"Successfully ingested {len(params_list)} holders into Neo4j for {contract_address}")
-                
-                # Verify data was inserted
-                try:
-                    verify_query = f"""
-                    MATCH (t:Token {{address: '{contract_address.lower()}'}})<-[r:HOLDS]-(w:Wallet) 
-                    RETURN COUNT(w) as count
-                    """
-                    context.log.info(f"Running verification query: {verify_query}")
-                    verify_result = context.resources.neo4j.run_query(verify_query)
-                    context.log.info(f"Verification query result: {verify_result}")
-                    holder_count = verify_result[0]['count'] if verify_result else 0
-                    context.log.info(f"Verified {holder_count} total holders for {contract_address} in Neo4j")
-                except Exception as e:
-                    context.log.error(f"Verification query failed: {str(e)}")
-                    context.log.error(traceback.format_exc())
-            except Exception as e:
-                context.log.error(f"Failed to ingest holders into Neo4j: {str(e)}")
-                context.log.error(traceback.format_exc())
-                break
-                
+            # Format DataFrame with column names suitable for Neo4j
+            df['address'] = df['holderAddress'].str.lower()
+            df['balance'] = df['balance'].astype(float) 
+            df['balanceRaw'] = df['balanceRawInteger']
+            df = df[['address', 'balance', 'balanceRaw']]  # Keep only columns we need
+            
+            # Append to the full holders dataframe for this token
+            if all_holders_df is None:
+                all_holders_df = df
+            else:
+                all_holders_df = pd.concat([all_holders_df, df], ignore_index=True)
+            
             total_holders += page_count
             
             # Check if there are more pages
@@ -123,11 +80,80 @@ def fetch_and_ingest_holders(context, contract_address: str):
                 context.log.info(f"No more pages for {contract_address}")
                 break
 
-            time.sleep(1)
+            time.sleep(1)  # Avoid rate limiting
         except Exception as e:
             context.log.error(f"Unexpected error processing holders for {contract_address}: {str(e)}")
             context.log.error(traceback.format_exc())
             break
+    
+    # Step 2: Save data to S3 and ingest into Neo4j
+    if all_holders_df is not None and not all_holders_df.empty:
+        try:
+            context.log.info(f"Preparing to ingest {len(all_holders_df)} holders for {contract_address}")
+            
+            # Create bucket name with environment prefix
+            bucket_name = f"quotient-pclank-token-holders"
+            file_name = f"holders-{contract_address.lower()}-{int(time.time())}"
+            
+            # Create LOAD CSV Cypher query with the token address hard-coded
+            # Simplified query that returns count directly
+            cypher_query = f"""
+            LOAD CSV WITH HEADERS FROM '{{csv_url}}' AS row
+            MERGE (w:Wallet {{address: row.address}})
+            WITH w, row
+            MATCH (t:Token {{address: '{contract_address.lower()}'}})
+            MERGE (w)-[r:HOLDS]->(t)
+            SET r.balance = tofloat(row.balance), 
+                r.balanceRaw = tofloat(row.balanceRaw), 
+                r.lastUpdated = datetime()
+            RETURN count(r) AS count
+            """
+            context.log.info(cypher_query)
+            
+            # Use ingestor to save to S3 and run the Cypher query
+            result = context.resources.neo4j_ingestor.ingest_dataframe(
+                df=all_holders_df,
+                bucket_name=bucket_name,
+                file_name=file_name,
+                cypher_query=cypher_query
+            )
+            
+            context.log.info(result)
+            # Log details about the ingestion
+            context.log.info(f"S3 CSV ingestion completed: {result['successful_chunks']}/{result['total_chunks']} chunks processed")
+            
+            # Get total_records from results if available
+            total_ingested = 0
+            
+            for i, chunk_result in enumerate(result.get('results', [])):
+                if chunk_result and len(chunk_result) > 0:
+                    chunk_count = chunk_result[0].value()
+                    total_ingested += chunk_count
+                    context.log.info(f"Chunk {i+1}: Ingested {chunk_count} records")
+                else:
+                    context.log.warning(f"Chunk {i+1}: Could not determine number of records ingested")
+                    context.log.info(f"Chunk result structure: {chunk_result}")
+            
+            context.log.info(f"Total records ingested across all chunks: {total_ingested}")
+            
+            # Verify data was inserted with a direct query
+            try:
+                verify_query = f"""
+                MATCH (t:Token {{address: '{contract_address.lower()}'}})<-[r:HOLDS]-(w:Wallet) 
+                RETURN COUNT(w) as count
+                """
+                verify_result = context.resources.neo4j_ingestor.run_query(verify_query)
+                holder_count = verify_result[0]['count'] if verify_result else 0
+                context.log.info(f"Verified {holder_count} total holders for {contract_address} in Neo4j")
+            except Exception as e:
+                context.log.error(f"Verification query failed: {str(e)}")
+                context.log.error(traceback.format_exc())
+                
+        except Exception as e:
+            context.log.error(f"Failed to ingest holders into Neo4j: {str(e)}")
+            context.log.error(traceback.format_exc())
+    else:
+        context.log.warning(f"No holder data to ingest for {contract_address}")
     
     context.log.info(f"Completed processing {total_holders} total holders for {contract_address}")
     return total_holders

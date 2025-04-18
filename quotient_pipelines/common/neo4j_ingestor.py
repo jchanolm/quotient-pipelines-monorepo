@@ -6,20 +6,17 @@ import pandas as pd
 import boto3
 from typing import List, Dict, Any, Optional
 
-from dagster import ConfigurableResource
+from dagster import resource, InitResourceContext
 from neo4j import GraphDatabase, BoltDriver
 
-class Neo4jIngestor(ConfigurableResource):
+@resource
+class Neo4jIngestor:
     """
     A utility class for ingesting data into Neo4j via S3 CSV files.
     This combines S3 utilities with Neo4j query execution.
-    
-    Configuration:
-    - bucket_name: S3 bucket to use for storing CSV files
-    - region: AWS region for the bucket (default: us-east-2)
     """
     
-    def setup_resource(self, _):
+    def __init__(self, init_context: InitResourceContext):
         # Initialize AWS clients with region from env var or default to us-east-2
         self.region = "us-east-2"
         self.s3_client = boto3.client("s3", region_name=self.region)
@@ -32,7 +29,7 @@ class Neo4jIngestor(ConfigurableResource):
         self.neo4j_database = None 
         
         # Log initialization
-        logging.info(f"Neo4jIngestor initialized with region: {self.region}")
+        init_context.log.info(f"Neo4jIngestor initialized with region: {self.region}")
     
     def ingest_dataframe(self, 
                          df: pd.DataFrame, 

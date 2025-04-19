@@ -33,6 +33,6 @@ class Neo4jClient:
 def neo4j_resource(init_context: InitResourceContext) -> Neo4jClient:
     uri = os.getenv("NEO4J_URI")
     user = os.getenv("NEO4J_USER")
-    pwd = os.getenv("NEO4J_PASSWORD")
+    pwd = os.getenv("NEO4J_PASS")
     driver = GraphDatabase.driver(uri, auth=(user, pwd))
     return Neo4jClient(driver)

@@ -168,29 +168,28 @@ def set_pclank_believer_scores(context, metadata_results=None, holder_count_resu
 @graph
 def pclank_believer_score_graph():
     # First: Fetch and merge Product Clank tokens
-    # fetch_and_merge_pclank_tokens()
+    fetch_and_merge_pclank_tokens()
     
     # Then get all addresses from Neo4j
     addrs = list_addresses()
     
     # Get and set token metadata
-    # metas = fetch_moralis_token_metadata(addrs)
-    # metadata_results = metas.map(set_token_metadata)
+    metas = fetch_moralis_token_metadata(addrs)
+    metadata_results = metas.map(set_token_metadata)
     
     # # Get and set holder counts for each token
-    # holder_counts = get_token_holders_count_ankr(addrs)
-    # holder_count_results = holder_counts.map(set_token_holder_count)
+    holder_counts = get_token_holders_count_ankr(addrs)
+    holder_count_results = holder_counts.map(set_token_holder_count)
     
     # ADDED: Process addresses for holder ingestion using S3 and Neo4j
-    addr_outputs = process_addresses(addrs)
-    holder_ingestion_results = addr_outputs.map(fetch_and_ingest_holders)
+    # addr_outputs = process_addresses(addrs)
+    # holder_ingestion_results = addr_outputs.map(fetch_and_ingest_holders)
     
-    # # Only run set_pclank_believer_scores after all operations are complete
-    # set_pclank_believer_scores(
-    #     metadata_results.collect(),
-    #     holder_count_results.collect(),
-    #     holder_ingestion_results.collect()
-    # )
+    # Only run set_pclank_believer_scores after all operations are complete
+    set_pclank_believer_scores(
+        metadata_results.collect(),
+        holder_count_results.collect(),
+    )
 
 
 # ─── 5) Expose as a Job & Definitions ─────────────────────────────────────────

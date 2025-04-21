@@ -131,10 +131,11 @@ class S3Utils:
         if df.memory_usage(index=False).sum() > max_size or len(df) > max_lines:
             chunks = self.split_dataframe(df, chunk_size=max_lines)
 
-        logging.info("Uploading data...")
+        logging.info(f"Uploading data... there are {len(chunks)} chunks...")
         urls = []
         for chunk, chunk_id in zip(chunks, range(len(chunks))):
             chunk_name = f"{file_name}--{chunk_id}.csv"
+            logging.info(f"Uploading chunk: {chunk_name}...")
             chunk.to_csv(f"s3://{self.bucket_name}/{chunk_name}", index=False, escapechar='\\')
             self.s3_resource.ObjectAcl(self.bucket_name, chunk_name).put(ACL=ACL)
             location = self.s3_client.get_bucket_location(Bucket=self.bucket_name)["LocationConstraint"]

@@ -13,7 +13,7 @@ class FcsScraperCyphers(Cypher):
 
         query = """
         MATCH (wc:Warpcast:Account)
-        WHERE wc.fcCredScore > 19
+        WHERE wc.fcCredScore > 10
         RETURN DISTINCT wc.fid as fid
         """
         results = self.query(query)

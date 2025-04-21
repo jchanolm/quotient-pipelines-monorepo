@@ -19,7 +19,7 @@ load_dotenv()
 
 class Multiprocessing:
     def __init__(self) -> None:
-        self.max_thread = max(8, multiprocessing.cpu_count() * 2)
+        self.max_thread = max(6, multiprocessing.cpu_count() * 2)
         if os.environ.get("DEBUG", False):
             self.max_thread = multiprocessing.cpu_count() - 1
         os.environ["NUMEXPR_MAX_THREADS"] = str(self.max_thread)
@@ -54,7 +54,7 @@ class Multiprocessing:
 
 
 class FcsScraper(Scraper):
-    def __init__(self, bucket_name="fcs", load_data=False, weeks=12):
+    def __init__(self, bucket_name="fcs", load_data=False, weeks=4):
         super().__init__(bucket_name=bucket_name, load_data=load_data)
         self.cyphers = FcsScraperCyphers()
         self.FARCASTER_EPOCH = datetime(2021, 1, 1, tzinfo=timezone.utc)
@@ -65,12 +65,35 @@ class FcsScraper(Scraper):
             self.cutoff_timestamp = (current_time - timedelta(days=7 * weeks)).timestamp()
         # Initialize multiprocessing
         self.mp = Multiprocessing()
+        # Rate limiting for Neynar API
+        self.request_timestamps = []
+        self.max_requests_per_minute = 500
 
     # Your existing methods remain the same...
     def convert_timestamp(self, timestamp):
         """Convert Farcaster timestamp to UTC datetime."""
         dt = self.FARCASTER_EPOCH + timedelta(seconds=int(timestamp))
         return dt.timestamp()  # Return Unix timestamp as float
+
+    def apply_rate_limit(self):
+        """
+        Implement rate limiting to stay within 600 requests per 60s window
+        """
+        current_time = time.time()
+        
+        # Remove timestamps older than 60 seconds
+        self.request_timestamps = [ts for ts in self.request_timestamps if current_time - ts < 60]
+        
+        # If we've reached the limit, wait until we can make another request
+        if len(self.request_timestamps) >= self.max_requests_per_minute:
+            oldest_timestamp = min(self.request_timestamps)
+            sleep_time = 60 - (current_time - oldest_timestamp)
+            if sleep_time > 0:
+                logging.info(f"Rate limit reached. Sleeping for {sleep_time:.2f} seconds...")
+                time.sleep(sleep_time)
+        
+        # Add current request timestamp
+        self.request_timestamps.append(time.time())
 
     def query_neynar_hub(self, endpoint, params=None):
         """
@@ -90,41 +113,142 @@ class FcsScraper(Scraper):
         all_messages = []
         max_retries = 3
         initial_retry_delay = 1.0
+        next_page_token = None
 
-        # === retry/backoff for this request ===
-        retry_delay = initial_retry_delay
-        for attempt in range(max_retries):
-            try:
-                time.sleep(0.1)
-                logging.debug(f"GET {url} params={req_params!r}")
-                response = r.get(url, headers=headers, params=req_params)
+        while True:
+            # Update params with page token if available
+            if next_page_token:
+                req_params['pageToken'] = next_page_token
 
-                if response.status_code != 200:
-                    logging.error(f"Non-200 response: {response.status_code} – {response.text}")
-                    return all_messages
+            # === retry/backoff for this request ===
+            retry_delay = initial_retry_delay
+            success = False
+            data = None
 
-                response.raise_for_status()
-                data = response.json()
-                break  # success, exit retry loop
+            for attempt in range(max_retries):
+                try:
+                    # Apply rate limiting before making request
+                    self.apply_rate_limit()
+                    
+                    logging.debug(f"GET {url} params={req_params!r}")
+                    response = r.get(url, headers=headers, params=req_params)
 
-            except Exception as e:
-                if attempt == max_retries - 1:
-                    logging.error(f"Failed after {max_retries} attempts: {e}")
-                    return all_messages
-                logging.warning(f"Attempt {attempt+1} failed ({e}), retrying in {retry_delay}s…")
-                time.sleep(retry_delay)
-                retry_delay *= 2
+                    if response.status_code != 200:
+                        logging.error(f"Non-200 response: {response.status_code} – {response.text}")
+                        return all_messages
 
-        # === collect and convert timestamps ===
-        msgs = data.get('messages', [])
-        for msg in msgs:
-            ts = msg.get('data', {}).get('timestamp')
-            if ts is not None:
-                msg['data']['timestamp'] = int(self.convert_timestamp(ts))
-        all_messages.extend(msgs)
-        logging.info(f"Retrieved {len(all_messages)} messages total…")
+                    response.raise_for_status()
+                    data = response.json()
+                    success = True
+                    break  # success, exit retry loop
 
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        logging.error(f"Failed after {max_retries} attempts: {e}")
+                        return all_messages
+                    logging.warning(f"Attempt {attempt+1} failed ({e}), retrying in {retry_delay}s…")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+
+            if not success or not data:
+                break
+
+            # === collect and convert timestamps ===
+            msgs = data.get('messages', [])
+            if not msgs:
+                break  # No more messages to process
+
+            for msg in msgs:
+                ts = msg.get('data', {}).get('timestamp')
+                if ts is not None:
+                    msg['data']['timestamp'] = int(self.convert_timestamp(ts))
+            all_messages.extend(msgs)
+            
+            # Check for next page token
+            next_page_token = data.get('nextPageToken')
+            if not next_page_token:
+                break  # No more pages to fetch
+                
+            logging.info(f"Retrieved {len(all_messages)} messages so far, fetching next page...")
+
+        logging.info(f"Retrieved {len(all_messages)} messages total...")
         return all_messages
+    
+    def query_neynar_api(self, endpoint, params=None):
+        """
+        Fetch data from the Neynar API v2
+        """
+        base_url = "https://api.neynar.com/v2/farcaster/"
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": self.NEYNAR_API_KEY,
+        }
+        url = f"{base_url}{endpoint}"
+
+        # Build params
+        req_params = (params or {}).copy()
+        req_params['limit'] = 100  # Maximum allowed by the API
+
+        all_items = []
+        max_retries = 3
+        initial_retry_delay = 1.0
+        cursor = None
+
+        while True:
+            # Update params with cursor if available
+            if cursor:
+                req_params['cursor'] = cursor
+
+            # === retry/backoff for this request ===
+            retry_delay = initial_retry_delay
+            success = False
+            data = None
+
+            for attempt in range(max_retries):
+                try:
+                    # Apply rate limiting before making request
+                    self.apply_rate_limit()
+                    
+                    logging.debug(f"GET {url} params={req_params!r}")
+                    response = r.get(url, headers=headers, params=req_params)
+
+                    if response.status_code != 200:
+                        logging.error(f"Non-200 response: {response.status_code} – {response.text}")
+                        return all_items
+
+                    response.raise_for_status()
+                    data = response.json()
+                    success = True
+                    break  # success, exit retry loop
+
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        logging.error(f"Failed after {max_retries} attempts: {e}")
+                        return all_items
+                    logging.warning(f"Attempt {attempt+1} failed ({e}), retrying in {retry_delay}s…")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+
+            if not success or not data:
+                break
+
+            # Process reactions data
+            reactions = data.get('reactions', [])
+            if not reactions:
+                break  # No more items to process
+
+            all_items.extend(reactions)
+            
+            # Check for next cursor
+            next_cursor = data.get('next', {}).get('cursor')
+            if not next_cursor:
+                break  # No more pages to fetch
+                
+            cursor = next_cursor
+            logging.info(f"Retrieved {len(all_items)} items so far, fetching next page...")
+
+        logging.info(f"Retrieved {len(all_items)} items total...")
+        return all_items
         
     def get_user_follows(self, fid):
         endpoint = "linksByFid"
@@ -138,7 +262,6 @@ class FcsScraper(Scraper):
             'source': fid,
             'target': item['data']['linkBody'].get('targetFid'),
             'timestamp': item['data'].get('timestamp'),
-            'edge_type': 'FOLLOWS'
         } for item in messages 
           if "data" in item 
           and "linkBody" in item["data"] 
@@ -146,44 +269,42 @@ class FcsScraper(Scraper):
           and item['data'].get('timestamp')]
 
     def get_user_likes(self, fid):
-        endpoint = "reactionsByFid"
+        endpoint = "reactions/user"
         params = {
             'fid': fid,
-            'reaction_type': 'Like'
+            'type': 'likes'
         }
-        messages = self.query_neynar_hub(endpoint, params)
+        reactions = self.query_neynar_api(endpoint, params)
 
         return [{
             'source': fid,
-            'target': item['data']['reactionBody']['targetCastId'].get('fid'),
-            'target_hash': item['data']['reactionBody']['targetCastId'].get('hash'),
-            'timestamp': item['data'].get('timestamp'),
+            'target': reaction['cast']['author']['fid'],
+            'timestamp': datetime.fromisoformat(reaction['reaction_timestamp'].replace('Z', '+00:00')).timestamp(),
             'edge_type': 'LIKED'
-        } for item in messages 
-          if "data" in item 
-          and "reactionBody" in item["data"] 
-          and item['data']['reactionBody'].get('targetCastId') 
-          and item['data'].get('timestamp')]
+        } for reaction in reactions 
+          if reaction.get('reaction_type') == 'like'
+          and reaction.get('cast')
+          and reaction.get('cast', {}).get('author', {}).get('fid')
+          and reaction.get('reaction_timestamp')]
 
     def get_user_recasts(self, fid):
-        endpoint = "reactionsByFid"
+        endpoint = "reactions/user"
         params = {
             'fid': fid,
-            'reaction_type': 'Recast'
+            'type': 'recasts'
         }
-        messages = self.query_neynar_hub(endpoint, params)
+        reactions = self.query_neynar_api(endpoint, params)
 
         return [{
             'source': fid,
-            'target': item['data']['reactionBody']['targetCastId'].get('fid'),
-            'target_hash': item['data']['reactionBody']['targetCastId'].get('hash'),
-            'timestamp': item['data'].get('timestamp'),
-            'edge_type': 'RECASTED'
-        } for item in messages 
-        if "data" in item 
-        and "reactionBody" in item["data"] 
-        and item['data']['reactionBody'].get('targetCastId') 
-        and item['data'].get('timestamp')]
+            'target': reaction['cast']['author']['fid'],
+            'target_hash': reaction['cast']['hash'],
+            'timestamp': datetime.fromisoformat(reaction['reaction_timestamp'].replace('Z', '+00:00')).timestamp()
+        } for reaction in reactions 
+          if reaction.get('reaction_type') == 'recast'
+          and reaction.get('cast')
+          and reaction.get('cast', {}).get('author', {}).get('fid')
+          and reaction.get('reaction_timestamp')]
 
     def get_user_casts(self, fid):
         logging.info(f"Collecting casts for user {fid}.....")
@@ -232,7 +353,9 @@ class FcsScraper(Scraper):
             fids,
             description="Processing follows for FIDs"
         )
-        return follows_list
+        # Flatten the list of lists
+        flattened_follows = [item for sublist in follows_list for item in sublist]
+        return flattened_follows
 
     def get_all_replies(self, fids):
         logging.info("Capturing replies relationships...")
@@ -242,7 +365,9 @@ class FcsScraper(Scraper):
             fids,
             description="Processing replies for FIDs"
         )
-        return replies_list
+        # Flatten the list of lists
+        flattened_replies = [item for sublist in replies_list for item in sublist]
+        return flattened_replies
 
     def get_all_likes(self, fids):
         logging.info("Capturing likes relationships...")
@@ -252,7 +377,9 @@ class FcsScraper(Scraper):
             fids,
             description="Processing likes for FIDs"
         )
-        return likes_list
+        # Flatten the list of lists
+        flattened_likes = [item for sublist in likes_list for item in sublist]
+        return flattened_likes
     
     def get_all_recasts(self, fids):
         logging.info("Capturing recast relationships...")
@@ -262,32 +389,32 @@ class FcsScraper(Scraper):
             fids,
             description="Processing recasts for FIDs"
         )
-        return recasts_list
+        # Flatten the list of lists
+        flattened_recasts = [item for sublist in recasts_list for item in sublist]
+        return flattened_recasts
 
     def run(self):
         logging.info("Collecting bootstrap FIDs...")
         bootstrap_fids = self.collect_bootstrap_fids()
         
-                ## get likes 
-        likes = self.get_all_likes(bootstrap_fids)
-        self.data['likes'] = likes
-
-
-        # ## get followers
-        # follows = self.get_all_follows(bootstrap_fids)
-        # self.data['follows'] = follows
-
-        # ## get replies
-        # replies = self.get_all_replies(bootstrap_fids)
-        # self.data['replies'] = replies
-
-        # ## get likes 
+        ## get likes 
         # likes = self.get_all_likes(bootstrap_fids)
         # self.data['likes'] = likes
 
         # ## get recasts
         # recasts = self.get_all_recasts(bootstrap_fids)
         # self.data['recasts'] = recasts
+
+        follows = self.get_all_follows(bootstrap_fids)
+        self.data['follows'] = follows
+
+        # ## get followers - still using hub API
+        # follows = self.get_all_follows(bootstrap_fids)
+        # self.data['follows'] = follows
+
+        # ## get replies - still using hub API
+        replies = self.get_all_replies(bootstrap_fids)
+        self.data['replies'] = replies
 
         self.save_data()
 

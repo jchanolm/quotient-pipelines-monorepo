@@ -54,7 +54,7 @@ class Multiprocessing:
 
 
 class FcsScraper(Scraper):
-    def __init__(self, bucket_name="fcs", load_data=False, weeks=4):
+    def __init__(self, bucket_name="fcs", load_data=False, weeks=2):
         super().__init__(bucket_name=bucket_name, load_data=load_data)
         self.cyphers = FcsScraperCyphers()
         self.FARCASTER_EPOCH = datetime(2021, 1, 1, tzinfo=timezone.utc)

@@ -20,7 +20,7 @@ load_dotenv()
 class Multiprocessing:
     def __init__(self) -> None:
         self.max_thread = max(6, multiprocessing.cpu_count() * 2)
-        if os.environ.get("DEBUG", False):
+        if os.environ.get("INFO", False):
             self.max_thread = multiprocessing.cpu_count() - 1
         os.environ["NUMEXPR_MAX_THREADS"] = str(self.max_thread)
 

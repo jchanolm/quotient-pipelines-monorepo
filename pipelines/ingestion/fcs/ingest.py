@@ -99,9 +99,33 @@ class FcsIngestor(Ingestor):
         recasts_urls = self.save_df_as_csv(bucketed_recasts_df, f"recasts_data_from_{self.asOf}")
         self.cyphers.create_recasts(recasts_urls)
 
+    def load_follows_data(self):
+        follows_data = self.scraper_data['follows']
+        follows_df = pd.DataFrame(follows_data)
+        bucketed_follows = self.bucket_data(follows_df)
+        return bucketed_follows 
+    
+    def ingest_follows_data(self):
+        follows_df = self.load_follows_data()
+        follows_urls = self.save_df_as_csv(follows_df, f'follows_data_{self.asOf}')
+        self.cyphers.create_follows_relationships(follows_urls)
+
+    def load_replies_data(self):
+        replies_data = self.scraper_data['replies']
+        replies_df = pd.DataFrame(replies_data)
+        bucketed_replies = self.bucket_data(replies_df)
+        return bucketed_replies
+    
+    def ingest_replies_data(self):
+        replies_data = self.load_replies_data()
+        replies_urls = self.save_df_as_csv(replies_data, f"replies_data_{self.asOf}")
+        self.cyphers.create_replies_relationships(replies_urls)
+
     def run(self):
+        self.ingest_likes_data()
         # self.ingest_likes_data()
-        self.ingest_recasts_data()
+        # self.ingest_recasts_data()
+        # self.ingest_replies_data()
 
 if __name__ == "__main__":
     ingestor = FcsIngestor()

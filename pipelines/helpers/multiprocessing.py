@@ -8,7 +8,7 @@ DEBUG = os.environ.get("DEBUG", False)
 
 class Multiprocessing:
     def __init__(self) -> None:
-        self.max_thread = max(8, multiprocessing.cpu_count() * 2)
+        self.max_thread = max(1, multiprocessing.cpu_count() * 2)
         if DEBUG:
             self.max_thread = multiprocessing.cpu_count() - 1
         os.environ["NUMEXPR_MAX_THREADS"] = str(self.max_thread)
@@ -33,13 +33,15 @@ class Multiprocessing:
     def parallel_process(self, 
                          function, 
                          array: list, 
-                         description: str = "Multithreaded processing running... Give me a description!") -> list:
+                         description: str = "Multithreaded processing running... Give me a description!",
+                         n_jobs: int = None) -> list:
         """
         Wrapper to execute a function as a parallel process using jobLib. 
         It expects the following:
         - The function takes a single argument. This argument can be expanded inside the function if needed
         - The array contains the arguments for the function to be processed.py
         - The description for logging purposes
+        - n_jobs: optional number of threads to use, defaults to self.max_thread if not provided
 
         Example:
         def square(x):
@@ -50,6 +52,9 @@ class Multiprocessing:
         parallel_process(square, Xs)
         >> [1, 4, 9, 16]
         """
+        # Use provided n_jobs if specified, otherwise use default max_thread
+        threads = n_jobs if n_jobs is not None else self.max_thread
+        
         with self.tqdm_joblib(tqdm(desc=description, total=len(array))):
-            data = joblib.Parallel(n_jobs=self.max_thread, backend="threading")(joblib.delayed(function)(element) for element in array)
+            data = joblib.Parallel(n_jobs=threads, backend="threading")(joblib.delayed(function)(element) for element in array)
         return data

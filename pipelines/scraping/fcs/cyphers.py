@@ -9,15 +9,23 @@ class FcsScraperCyphers(Cypher):
         super().__init__(database)
         self.asOf = datetime.datetime.now().strftime("%Y:%m:%d:%H:%M")
 
+    @count_query_logging
     def collect_bootstrap_fids(self):
-
         query = """
         MATCH (wc:Warpcast:Account)
-        WHERE wc.fcCredScore > 10
+        WHERE wc.fcCredScore >= 20
+        AND NOT (wc)-[:LIKED]->()
         RETURN DISTINCT wc.fid as fid
+        ORDER BY fid ASC
         """
         results = self.query(query)
-
         return results
 
-
+    @count_query_logging
+    def get_last_fid(self):
+        query = """
+        MATCH (wc:Warpcast:Account)
+        RETURN MAX(wc.fid) as fid
+        """
+        results = self.query(query)[0]
+        return results

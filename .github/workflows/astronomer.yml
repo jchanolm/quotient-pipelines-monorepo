@@ -1,0 +1,50 @@
+name: Deploy to Astronomer Cloud
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  ASTRONOMER_KEY_ID: ${{ secrets.ASTRONOMER_KEY_ID }}
+  ASTRONOMER_KEY_SECRET: ${{ secrets.ASTRONOMER_KEY_SECRET }}
+  ASTRONOMER_DEPLOYMENT_ID: ${{ secrets.ASTRONOMER_DEPLOYMENT_ID }}
+  DOCKER_REGISTRY: ${{ secrets.DOCKER_REGISTRY }}
+  
+  # Environment variables for the scraper
+  NEYNAR_API_KEY: ${{ secrets.NEYNAR_API_KEY }}
+  MNEMONIC: ${{ secrets.MNEMONIC }}
+  NEO4J_URI: ${{ secrets.NEO4J_URI }}
+  NEO4J_USERNAME: ${{ secrets.NEO4J_USERNAME }}
+  NEO4J_PASSWORD: ${{ secrets.NEO4J_PASSWORD }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install Astronomer CLI
+        run: |
+          curl -ssl https://install.astronomer.io | sudo bash
+          astro version
+
+      - name: Build Scraper Docker Image
+        run: |
+          docker build -t $DOCKER_REGISTRY/farcaster-scraper:$GITHUB_SHA .
+          docker push $DOCKER_REGISTRY/farcaster-scraper:$GITHUB_SHA
+
+      - name: Update Astronomer Config
+        run: |
+          sed -i "s|your-registry.com|$DOCKER_REGISTRY|g" .astro/config.yaml
+          sed -i "s|\${CIRCLE_SHA1:-latest}|$GITHUB_SHA|g" .astro/config.yaml
+
+      - name: Deploy to Astronomer
+        run: |
+          astro login astronomer.io --oauth-token $ASTRONOMER_KEY_ID:$ASTRONOMER_KEY_SECRET
+          astro deploy $ASTRONOMER_DEPLOYMENT_ID --force 

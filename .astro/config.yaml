@@ -1,0 +1,41 @@
+project:
+  name: farcaster-scraper
+
+astronomer_registry:
+  registry: registry.astronomer.io
+  repository: farcaster-scraper
+  tag: ${CIRCLE_SHA1:-latest}
+
+kubernetes:
+  resources:
+    operator:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: 2
+        memory: 2Gi
+
+airflow:
+  connections:
+    - id: docker_registry
+      type: docker
+      host: your-registry.com  # Replace with your actual registry
+      
+  variables:
+    - key: NEYNAR_API_KEY
+      value: '${NEYNAR_API_KEY}'
+    - key: MNEMONIC
+      value: '${MNEMONIC}'
+    - key: NEO4J_URI
+      value: '${NEO4J_URI}'
+    - key: NEO4J_USERNAME
+      value: '${NEO4J_USERNAME}'
+    - key: NEO4J_PASSWORD
+      value: '${NEO4J_PASSWORD}'
+    - key: AWS_ACCESS_KEY_ID
+      value: '${AWS_ACCESS_KEY_ID}'
+    - key: AWS_SECRET_ACCESS_KEY
+      value: '${AWS_SECRET_ACCESS_KEY}'
+    - key: S3_BUCKET_NAME
+      value: '${S3_BUCKET_NAME}' 

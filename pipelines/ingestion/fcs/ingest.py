@@ -122,10 +122,10 @@ class FcsIngestor(Ingestor):
         self.cyphers.create_replies_relationships(replies_urls)
 
     def run(self):
-        self.ingest_likes_data()
         # self.ingest_likes_data()
-        # self.ingest_recasts_data()
-        # self.ingest_replies_data()
+        self.ingest_follows_data()
+        self.ingest_recasts_data()
+        self.ingest_replies_data()
 
 if __name__ == "__main__":
     ingestor = FcsIngestor()

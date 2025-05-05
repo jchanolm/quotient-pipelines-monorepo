@@ -12,9 +12,7 @@ class FcsScraperCyphers(Cypher):
     @count_query_logging
     def collect_bootstrap_fids(self):
         query = """
-        MATCH (wc:Warpcast:Account)
-        WHERE wc.fcCredScore >= 20
-        AND NOT (wc)-[:LIKED]->()
+        MATCH (wc:Bootstrap)
         RETURN DISTINCT wc.fid as fid
         ORDER BY fid ASC
         """

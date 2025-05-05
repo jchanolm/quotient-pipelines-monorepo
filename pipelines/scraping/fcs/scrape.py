@@ -21,7 +21,7 @@ from .cyphers import FcsScraperCyphers
 load_dotenv(override=True)
 
 class FcsScraper(Scraper):
-    def __init__(self, bucket_name="fcs", load_data=False, weeks=3):
+    def __init__(self, bucket_name="fcs", load_data=False, weeks=1):
         super().__init__(bucket_name=bucket_name, load_data=load_data)
         self.cyphers = FcsScraperCyphers()
         self.FARCASTER_EPOCH = datetime(2021, 1, 1, tzinfo=timezone.utc)
@@ -497,20 +497,20 @@ class FcsScraper(Scraper):
         self.data['likes'] = likes
         logging.info(f"Collected {len(likes)} likes")
         
-        # # Get recasts
-        # recasts = self.get_all_recasts(fids_to_process)
-        # self.data['recasts'] = recasts
-        # logging.info(f"Collected {len(recasts)} recasts")
+        # Get recasts
+        recasts = self.get_all_recasts(fids_to_process)
+        self.data['recasts'] = recasts
+        logging.info(f"Collected {len(recasts)} recasts")
         
         # Get follows
-        # follows = self.get_all_follows(fids_to_process)
-        # self.data['follows'] = follows
-        # logging.info(f"Collected {len(follows)} follows")
+        follows = self.get_all_follows(fids_to_process)
+        self.data['follows'] = follows
+        logging.info(f"Collected {len(follows)} follows")
         
-        # # Get replies
-        # replies = self.get_all_replies(fids_to_process)
-        # self.data['replies'] = replies
-        # logging.info(f"Collected {len(replies)} replies")
+        # Get replies
+        replies = self.get_all_replies(fids_to_process)
+        self.data['replies'] = replies
+        logging.info(f"Collected {len(replies)} replies")
         
         # Save all data
         self.save_data()

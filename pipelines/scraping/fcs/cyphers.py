@@ -12,9 +12,10 @@ class FcsScraperCyphers(Cypher):
     @count_query_logging
     def collect_bootstrap_fids(self):
         query = """
-        MATCH (wc:Bootstrap)
+        MATCH (wc:WarpcastAccount)<-[]-(wc2:WarpcastAccount)
+        WHERE wc2.farconRank < 2500
         RETURN DISTINCT wc.fid as fid
-        ORDER BY fid ASC
+        ORDER BY fid DESC
         """
         results = self.query(query)
         return results

@@ -21,7 +21,7 @@ class FcsIngestCyphers(Cypher):
                 target.needsEnrichment = True
             WITH source, target, row 
             MERGE (source)-[r:LIKED {{bucketIndex: tointeger(row['bucket_index'])}}]->(target)
-            SET r.count = tointeger(row['count'])
+            SET r.count = tointeger(row['count']) 
             SET r.bucketStartTimestamp = tointeger(row['bucket_start_timestamp'])
             SET r.bucketEndTimestamp = tointeger(row['bucket_end_timestamp']) 
             SET r.bucketStartDtReadable = row['bucket_start_dt_readable']
@@ -54,7 +54,7 @@ class FcsIngestCyphers(Cypher):
                 target.needsEnrichment = True
             WITH source, target, row 
             MERGE (source)-[r:RECASTED {{bucketIndex: tointeger(row['bucket_index'])}}]->(target)
-            SET r.count = tointeger(row['count'])
+            SET r.count = tointeger(row['count']) * 5
             SET r.bucketStartTimestamp = tointeger(row['bucket_start_timestamp'])
             SET r.bucketEndTimestamp = tointeger(row['bucket_end_timestamp']) 
             SET r.bucketStartDtReadable = row['bucket_start_dt_readable']
@@ -108,7 +108,7 @@ class FcsIngestCyphers(Cypher):
             SET r.bucketIndex = tointeger(row['bucketIndex'])
             SET r.bucketEndTimestamp = tointeger(row['bucket_end_timestamp'])
             SET r.bucketStartTimestamp = tointeger(row['bucket_start_timestamp'])
-            SET r.count = tointeger(row['count'])
+            SET r.count = tointeger(row['count']) * 5
             SET r.bucketEndDtReadable = tointeger(row['bucket_start_dt_readable'])
             SET r.bucketStartDtReadable = tointeger(row['bucket_start_dt_readable'])
             RETURN COUNT(*)

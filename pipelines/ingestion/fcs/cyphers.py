@@ -93,7 +93,30 @@ class FcsIngestCyphers(Cypher):
             print(query)
             count += self.query(query)[0].value()
         return count 
-    
+
+    @count_query_logging
+    def create_follows_relationships_temp(self, urls):
+        count = 0 
+        url_counter = 0
+        for url in urls:
+            url_counter += 1
+            logging.info(f"Creating for {url_counter} out of {len(urls)}...")
+            query = f""" 
+            LOAD CSV WITH HEADERS FROM '{url}' as row
+            MATCH (source:Warpcast:Account {{fid: tointeger(row['source'])}})
+            WITH source , row
+            MERGE (target:Warpcast:Account:WarpcastAccount {{fid: tointeger(row['target'])}})
+            ON CREATE SET
+                target.needsEnrichment = True 
+            WITH source, target, row 
+            MERGE (source)-[r:FOLLOWED]->(target)
+            SET r.timestamp = tointeger(row['timestamp'])
+            RETURN COUNT(*)
+            """
+            print(query)
+            count += self.query(query)[0].value()
+        return count 
+
     @count_query_logging 
     def create_replies_relationships(self, urls):
         count =0 

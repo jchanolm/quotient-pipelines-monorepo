@@ -19,6 +19,16 @@ class FcsScraperCyphers(Cypher):
         """
         results = self.query(query)
         return results
+    
+    @count_query_logging
+    def get_client_fids(self):
+        query = """ 
+        MATCH (wc:WarpcastAccount)-[]-(:_Client)
+        RETURN DISTINCT wc.fid as fid 
+        """
+        results = self.query(query)
+        return results 
+    
 
     @count_query_logging
     def get_last_fid(self):

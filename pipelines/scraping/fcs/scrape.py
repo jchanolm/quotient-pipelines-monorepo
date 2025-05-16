@@ -21,7 +21,7 @@ from .cyphers import FcsScraperCyphers
 load_dotenv(override=True)
 
 class FcsScraper(Scraper):
-    def __init__(self, bucket_name="fcs", load_data=False, weeks=1):
+    def __init__(self, bucket_name="fcs", load_data=False, weeks=1.5):
         super().__init__(bucket_name=bucket_name, load_data=load_data)
         self.cyphers = FcsScraperCyphers()
         self.FARCASTER_EPOCH = datetime(2021, 1, 1, tzinfo=timezone.utc)
@@ -475,6 +475,12 @@ class FcsScraper(Scraper):
         flattened_recasts = [item for sublist in recasts_list for item in sublist]
         return flattened_recasts
 
+    def get_client_fids(self):
+        logging.info("Getting fids related to Quotient...")
+
+        fids = self.cyphers.get_client_fids()
+        return fids 
+    
     def run(self):
         logging.info("Starting Farcaster data collection...")
         
@@ -486,7 +492,7 @@ class FcsScraper(Scraper):
         # users = self.fetch_users_until_end()
         # self.data['new_users'] = users
 
-        # Fetching users to scrape...
+        logging.info("Fetching users to scrape...")
         fids_to_process = self.collect_bootstrap_fids()
         
         # Process user network data
@@ -497,7 +503,7 @@ class FcsScraper(Scraper):
         self.data['likes'] = likes
         logging.info(f"Collected {len(likes)} likes")
         
-        # Get recasts
+        # # Get recasts
         recasts = self.get_all_recasts(fids_to_process)
         self.data['recasts'] = recasts
         logging.info(f"Collected {len(recasts)} recasts")

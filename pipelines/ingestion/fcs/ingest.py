@@ -110,6 +110,12 @@ class FcsIngestor(Ingestor):
         follows_urls = self.save_df_as_csv(follows_df, f'follows_data_{self.asOf}')
         self.cyphers.create_follows_relationships(follows_urls)
 
+    def ingest_follows_data_temp(self):
+        follows_df = pd.DataFrame(self.scraper_data['follows'])
+        follows_df['source'] = follows_df['source'].apply(lambda x: x[0])
+        follows_urls = self.save_df_as_csv(follows_df, f"whoa_follows_data_{self.asOf}")
+        self.cyphers.create_follows_relationships_temp(follows_urls)
+
     def load_replies_data(self):
         replies_data = self.scraper_data['replies']
         replies_df = pd.DataFrame(replies_data)
@@ -123,9 +129,9 @@ class FcsIngestor(Ingestor):
 
     def run(self):
         # self.ingest_likes_data()
-        self.ingest_follows_data()
-        self.ingest_recasts_data()
-        self.ingest_replies_data()
+        self.ingest_follows_data_temp()
+        # self.ingest_recasts_data()
+        # self.ingest_replies_data()
 
 if __name__ == "__main__":
     ingestor = FcsIngestor()

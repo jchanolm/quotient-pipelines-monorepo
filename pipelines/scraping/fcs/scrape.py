@@ -21,7 +21,7 @@ from .cyphers import FcsScraperCyphers
 load_dotenv(override=True)
 
 class FcsScraper(Scraper):
-    def __init__(self, bucket_name="fcs", load_data=False, weeks=1.5):
+    def __init__(self, bucket_name="fcs-temp", load_data=False, weeks=2.5):
         super().__init__(bucket_name=bucket_name, load_data=load_data)
         self.cyphers = FcsScraperCyphers()
         self.FARCASTER_EPOCH = datetime(2021, 1, 1, tzinfo=timezone.utc)

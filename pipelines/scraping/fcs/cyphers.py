@@ -13,7 +13,7 @@ class FcsScraperCyphers(Cypher):
     def collect_bootstrap_fids(self):
         query = """
         MATCH (wc:WarpcastAccount)<-[]-(wc2:WarpcastAccount)
-        WHERE wc2.farconRank < 2500
+        WHERE wc2.farconRank < 500
         RETURN DISTINCT wc.fid as fid
         ORDER BY fid DESC
         """
